@@ -19,7 +19,7 @@
  *
  * @package    block
  * @subpackage ual_mymoodle
- * @copyright  2012 University of London Computer Centre
+ * @copyright  2012-13 University of London Computer Centre
  * @author     Ian Wild {@link http://moodle.org/user/view.php?id=325899}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -93,11 +93,21 @@ class block_ual_mymoodle extends block_base {
         }
 
         $showcode = 0;
+        $showmoodlecourses = 0;
         $trimmode = 1;
         $trimlength = 50;
+        $showhiddencourses = true;
 
         if (!empty($this->config->showcode)) {
             $showcode = (int)$this->config->showcode;
+        }
+
+        if (!empty($this->config->admin_tool_url)) {
+            $admin_tool_url = $this->config->admin_tool_url;
+        }
+
+        if (!empty($this->config->showmoodlecourses)) {
+            $showmoodlecourses = (int)$this->config->showmoodlecourses;
         }
 
         if (!empty($this->config->trimmode)) {
@@ -107,6 +117,9 @@ class block_ual_mymoodle extends block_base {
         if (!empty($this->config->trimlength)) {
             $trimlength = (int)$this->config->trimlength;
         }
+        
+        $context = get_context_instance(CONTEXT_SYSTEM);
+        $showhiddencourses = has_capability('block/ual_mymoodle:show_hidden_courses', $context);
 
         // Load userdefined title and make sure it's never empty.
         if (empty($this->config->title)) {
@@ -126,7 +139,7 @@ class block_ual_mymoodle extends block_base {
 
             $renderer = $this->page->get_renderer('block_ual_mymoodle');
 
-            $this->content->text = $renderer->course_hierarchy($showcode, $trimmode, $trimlength);
+            $this->content->text = $renderer->course_hierarchy($showcode, $trimmode, $trimlength, $showmoodlecourses, $showhiddencourses);
             $this->content->footer = '';
 
         }
@@ -151,5 +164,35 @@ class block_ual_mymoodle extends block_base {
      */
     public function instance_allow_multiple() {
         return false;
+    }
+
+    /**
+     * The 'My Moodle' block cannot be hidden by default as it is integral to
+     * the navigation of Moodle.
+     *
+     * @return false
+     */
+    function  instance_can_be_hidden() {
+        return false;
+    }
+
+    /**
+     * An instance can't be docked for the same reasons as for instance_can_be_hidden
+     *
+     * @return bool true or false depending on whether the instance can be docked or not.
+     */
+    function instance_can_be_docked() {
+        return false;
+    }
+
+    /**
+     * Don't allow anyone other than an administrator to delete this block as it's integral to
+     * the navigation of Moodle.
+     *
+     * @return boolean
+     */
+    function user_can_edit() {
+        $context = get_context_instance(CONTEXT_SYSTEM);
+        return (has_capability('block/ual_mymoodle:can_edit', $context));
     }
 }

@@ -33,17 +33,21 @@ require_once($CFG->dirroot . '/blocks/ual_mymoodle/lib.php');
 class block_ual_mymoodle_renderer extends plugin_renderer_base {
 
     private $showcode = 0;
+    private $showmoodlecourses = 0;
     private $trimmode = block_ual_mymoodle::TRIM_RIGHT;
     private $trimlength = 50;
+    private $showhiddencourses = false;
 
     /**
      * Prints course hierarchy view
      * @return string
      */
-    public function course_hierarchy($showcode, $trimmode, $trimlength) {
+    public function course_hierarchy($showcode, $trimmode, $trimlength, $showmoodlecourses, $showhiddencourses) {
         $this->showcode = $showcode;
+        $this->showmoodlecourses = $showmoodlecourses;
         $this->trimmode = $trimmode;
         $this->trimlength = $trimlength;
+        $this->showhiddencourses = $showhiddencourses;
 
         return $this->render(new course_hierarchy);
     }
@@ -55,13 +59,38 @@ class block_ual_mymoodle_renderer extends plugin_renderer_base {
      * @return string
      */
     public function render_course_hierarchy(course_hierarchy $tree) {
-        if (empty($tree) ) {
-            $html = $this->output->box(get_string('nocourses', 'block_ual_mymoodle'));
-        } else {
+        global $CFG;
+
+        $html = ""; // Start with an empty string.
+
+        $displayed_something = false;
+
+        if (!empty($tree->courses) ) {
             $htmlid = 'course_hierarchy_'.uniqid();
-            $html = '<div id="'.$htmlid.'">';
+            $html .= html_writer::start_tag('div', array('id' => $htmlid));
             $html .= $this->htmllize_tree($tree->courses);
-            $html .= '</div>';
+            $html .= html_writer::end_tag('div');
+
+            $displayed_something = true;
+        }
+
+        // Do we display courses that the user is enrolled on in Moodle but not enrolled on them according to the IDM data?
+        if($this->showmoodlecourses && !empty($tree->moodle_courses)) {
+            $orphaned_courses = html_writer::start_tag('ul', array('class' => 'orphaned'));
+            foreach($tree->moodle_courses as $course) {
+                $courselnk = $CFG->wwwroot.'/course/view.php?id='.$course->id;
+                $linkhtml = html_writer::link($courselnk,$course->fullname, array('class' => 'orphaned_course'));
+                $orphaned_courses .= html_writer::tag('li', $linkhtml);
+            }
+            $orphaned_courses .= html_writer::end_tag('ul');
+
+            $html .= $orphaned_courses;
+
+            $displayed_something = true;
+        }
+
+        if(!$displayed_something) {
+            $html .= $this->output->box(get_string('nocourses', 'block_ual_mymoodle'));
         }
 
         return $html;
@@ -79,9 +108,7 @@ class block_ual_mymoodle_renderer extends plugin_renderer_base {
 
         $result = html_writer::start_tag('ul');
 
-        if (empty($tree)) {
-            $result .= html_writer::tag('li', get_string('nothingtodisplay'));
-        } else {
+        if (!empty($tree)) {
             foreach ($tree as $node) {
 
                 $name = $node->get_fullname();
@@ -89,16 +116,17 @@ class block_ual_mymoodle_renderer extends plugin_renderer_base {
                     $name .= ' ('.$node->get_idnumber().')';
                 }
                 $course_fullname = $this->trim($name);
-                $node_type = $node->get_type();
 
-                // What id should we include in the rendered HTML?
-                $type_id = '';
+                // What type of node is this?
+                $node_type = $node->get_type();
+                // Is this course visible?
+                $visible = $node->get_visible();
                 // Is this a top level (a.k.a 'primary item') link?
                 $display_top_level = false;
                 // Is this a heading (i.e. displayed in bold)?
                 $display_heading = false;
                 // Should we display a link to the course?
-                $display_link = true;
+                $display_link = $visible;
                 // Do we display the events belonging to a course?
                 $display_events = false;
 
@@ -123,64 +151,78 @@ class block_ual_mymoodle_renderer extends plugin_renderer_base {
                         break;
                 }
 
+                $content = '';  // Start with empty content
+
                 // default content is the course name with no other formatting
-                $attributes = array('class' => $type_class);
-                // Construct the content...
-                $content = html_writer::tag('div', $course_fullname, $attributes);
+                $li_attributes = array('class' => $type_class);
+                
+                if($visible == false) {
+                	$li_attributes['class'] .= ' hidden';
+                }
+                
+                if($visible == true || $this->showhiddencourses) {    
+                    // Construct the content...
+                    $content = html_writer::tag('div', $course_fullname);
 
-                if($display_link == true) {
-                    // Create a link if the user is enrolled on the course (which they should be if the enrolment plugin is working as it should).
-                    if($node->get_user_enrolled() == true) {
-                        $attributes['title'] = $course_fullname;
-                        $moodle_url = $CFG->wwwroot.'/course/view.php?id='.$node->get_moodle_course_id();
-                        // replace the content...
-                        $content = html_writer::link($moodle_url, $course_fullname, $attributes);
-                    } else {
-                        // Display the name but it's not clickable...
-                        $content = html_writer::tag('i', $content);
+                    if($display_link == true) {
+                        // Create a link if the user is enrolled on the course (which they should be if the enrolment plugin is working as it should).
+                        if($node->get_user_enrolled() == true) {
+                            $moodle_url = $CFG->wwwroot.'/course/view.php?id='.$node->get_moodle_course_id();
+                            // replace the content...
+                            $content = html_writer::link($moodle_url, $course_fullname, array('title'=>$course_fullname));
+                        } else {
+                            // Display the name but it's not clickable...
+                            $content = html_writer::tag('i', $content);
+                        }
                     }
-                }
 
-                if($display_heading == true) {
-                    $content = html_writer::tag('strong', $content);
-                }
+                    if($display_heading == true) {
+                        $content = html_writer::tag('strong', $content);
+                    }
+                    
+                    /*
+                    if($visible == false) {
+                    	// Distingish a hidden course so we can style it.
+                    	$content = html_writer::tag('div', $content, array('class'=>'hidden_course'));
+                    }
+                    */
 
-                // A primary item could be a programme, course or unit
-                if($indent == 0) {
-                    $display_top_level = true;
-                }
+                    // A primary item could be a programme, course or unit
+                    if($indent == 0) {
+                        $display_top_level = true;
+                    }
 
-                if($display_top_level == true) {
-                    $content = html_writer::tag('h2', $content);
-                }
+                    if($display_top_level == true) {
+                        $content = html_writer::tag('h2', $content);
+                    }
 
-                if($display_events == true) {
-                    // Get events
-                    $events = $this->print_overview($node->get_moodle_course_id());
-                    if(!empty($events)) {
-                        // Display the events as a nested linked list
-                        $event_list = html_writer::start_tag('ul', array('id' => 'course_events'));
-                        foreach($events as $courseid=>$mod_events) {
-                            if(!empty($mod_events)) {
-                                foreach($mod_events as $mod_type=>$event_html) {
-                                    $event_list .= html_writer::tag('li', $event_html);
+                    if($display_events == true) {
+                        // Get events
+                        $events = $this->print_overview($node->get_moodle_course_id());
+                        if(!empty($events)) {
+                            // Display the events as a nested linked list
+                            $event_list = html_writer::start_tag('ul', array('id' => 'course_events'));
+                            foreach($events as $courseid=>$mod_events) {
+                                if(!empty($mod_events)) {
+                                    foreach($mod_events as $mod_type=>$event_html) {
+                                        $event_list .= html_writer::tag('li', $event_html);
+                                    }
                                 }
                             }
-                        }
-                        $event_list .= html_writer::end_tag('ul');
+                            $event_list .= html_writer::end_tag('ul');
 
-                        $content .= $event_list;
+                            $content .= $event_list;
+                        }
                     }
                 }
 
                 $children = $node->get_children();
 
                 if ($children == null) {
-                    $result .= html_writer::tag('li', $content, $attributes);
-
+                    $result .= html_writer::tag('li', $content, $li_attributes);
                 } else {
                     // If this has parents OR it doesn't have parents or children then we need to display it...???
-                    $result .= html_writer::tag('li', $content.$this->htmllize_tree($children, $indent+1), $attributes);
+                    $result .= html_writer::tag('li', $content.$this->htmllize_tree($children, $indent+1), $li_attributes);
                 }
             }
         }

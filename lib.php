@@ -29,6 +29,8 @@ class course_hierarchy implements renderable {
     public $orphaned_courses = array();
     public $orphaned_units = array();
 
+    public $moodle_courses = array();
+
     public function __construct() {
         global $USER, $CFG;
         $this->context = get_context_instance(CONTEXT_USER, $USER->id);
@@ -47,6 +49,9 @@ class course_hierarchy implements renderable {
 
             // Which programmes is this user enrolled on?
             $programmes = $mis->get_user_programmes($ual_username);
+
+            // Is the user enrolled on any Moodle courses that aren't recorded in the IDM data?
+            $this->moodle_courses = $mis->get_moodle_courses($USER->id, $ual_username);
 
             // Now make each course adopt a unit. Note that units could have more than one parent...
             $this->courses = $this->construct_view_tree($programmes, $courses, $units);
@@ -78,6 +83,12 @@ class course_hierarchy implements renderable {
                     $programme_code = $programme->get_aos_code().$programme->get_aos_period().$programme->get_acad_period();
                     $programme->set_user_enrolled($mis->get_enrolled($USER->id, $programme->get_moodle_course_id()));
                     $reference_programmes[$programme_code] = $programme;
+
+                    // Remove programme from the $moodle_courses array if necessary
+                    $programme_moodle_id = $programme->get_moodle_course_id();
+                    if(isset($this->moodle_courses[$programme_moodle_id])) {
+                        unset($this->moodle_courses[$programme_moodle_id]);
+                    }
                 }
             }
 
@@ -117,9 +128,12 @@ class course_hierarchy implements renderable {
                     if(strlen($unit->get_parent()) == 0) {
                         $orphaned_units[$unit_code] = $unit;
                     } else {
-                        $parent = $reference_courses[$unit->get_parent()];
-                        if(!empty($parent)) {
-                            $parent->adopt_child($unit);
+                        $unit_parent = $unit->get_parent();
+                        if(isset($reference_courses[$unit_parent])) {
+                            $parent = $reference_courses[$unit_parent];
+                            if(!empty($parent)) {
+                                $parent->adopt_child($unit);
+                            }
                         }
                     }
                 }
@@ -142,7 +156,9 @@ class course_hierarchy implements renderable {
                                 $course->set_idnumber($orphaned_course->get_idnumber());
                                 $course->set_moodle_course_id($orphaned_course->get_moodle_course_id());
                                 $course->set_user_enrolled($orphaned_course->get_user_enrolled());
-                                unset($orphaned_courses[$elementkey]);
+                                if(isset($orphaned_courses[$elementkey])) {
+                                    unset($orphaned_courses[$elementkey]);
+                                }
                             }
                         }
                     }
@@ -150,7 +166,14 @@ class course_hierarchy implements renderable {
                     if(!empty($new_courses)) {
                         $reference_programme->abandon_children();
                         foreach($new_courses as $new_course) {
+                            // Programmes need to adopt the 'Course (all years)'
                             $reference_programme->adopt_child($new_course);
+
+                            // Remove course (all years) from the $moodle_courses array if necessary
+                            $all_years_moodle_id = $new_course->get_moodle_course_id();
+                            if(isset($this->moodle_courses[$all_years_moodle_id])) {
+                                unset($this->moodle_courses[$all_years_moodle_id]);
+                            }
                         }
                     }
                 }
@@ -180,6 +203,8 @@ class course_hierarchy implements renderable {
     }
 
     private function get_years_from_courses($course_years) {
+        global $USER;
+
         $result = array();
 
         $grouped_courses = array();
@@ -201,6 +226,9 @@ class course_hierarchy implements renderable {
                     $moodle_course = $this->get_moodle_course($course_year);
                     if($moodle_course) {
                         $new_course->set_moodle_course_id($moodle_course->id);
+                        $new_course->set_fullname($moodle_course->fullname);
+                        $mis = new ual_mis();
+                        $new_course->set_user_enrolled($mis->get_enrolled($USER->id, $moodle_course->id));
                     }
 
                     $result[] = $new_course;
